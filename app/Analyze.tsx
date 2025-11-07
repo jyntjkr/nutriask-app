@@ -6,10 +6,11 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, Type, ArrowRight, X } from "lucide-react";
+import { Upload, Type, ArrowRight, X, Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { toast } from "sonner";
+import { AnalysisResult } from "@/lib/types";
 
 interface Ingredient {
   name: string;
@@ -18,20 +19,96 @@ interface Ingredient {
 
 const Analyze = () => {
   const router = useRouter();
-  const [inputMethod, setInputMethod] = useState<"upload" | "text">("text");
+  const [inputMethod, setInputMethod] = useState<"upload" | "text">("upload");
   const [ingredientText, setIngredientText] = useState("");
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  /**
+   * Handles image file upload
+   * Validates file size and type, then stores for analysis
+   */
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validate file size (7 MB limit for Gemini API)
+      const maxSize = 7 * 1024 * 1024; // 7 MB
+      if (file.size > maxSize) {
+        toast.error(`Image is too large. Maximum size is ${maxSize / 1024 / 1024} MB.`);
+        return;
+      }
+
+      // Validate file type
+      const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
+      if (!allowedTypes.includes(file.type)) {
+        toast.error("Invalid file type. Please upload a JPEG, PNG, WebP, or GIF image.");
+        return;
+      }
+
+      // Store the file for API call
+      setUploadedFile(file);
+
+      // Preview the image
       const reader = new FileReader();
       reader.onloadend = () => {
         setUploadedImage(reader.result as string);
-        toast.success("Image uploaded! (ML detection coming soon)");
+        toast.success("Image uploaded! Click 'Analyze' to identify the food.");
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  /**
+   * Sends the uploaded image to the Gemini API for analysis
+   * Handles loading states, errors, and response parsing
+   */
+  const handleAnalyzeImage = async () => {
+    if (!uploadedFile) {
+      toast.error("Please upload an image first.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    toast.loading("Analyzing image...", { id: "analyzing" });
+
+    try {
+      // Create FormData to send the image file
+      const formData = new FormData();
+      formData.append("image", uploadedFile);
+
+      // Call the API route
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Handle API errors
+        const error = data as { error: string; message: string; details?: string };
+        toast.error(error.message || "Failed to analyze image", { id: "analyzing" });
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Success: Parse the analysis result
+      const analysisResult = data as AnalysisResult;
+      
+      // Store the result in sessionStorage for the results page
+      sessionStorage.setItem("analysisResult", JSON.stringify(analysisResult));
+      
+      toast.success("Analysis complete!", { id: "analyzing" });
+      
+      // Navigate to results page
+      router.push("/results");
+
+    } catch (error) {
+      console.error("Error analyzing image:", error);
+      toast.error("An unexpected error occurred. Please try again.", { id: "analyzing" });
+      setIsAnalyzing(false);
     }
   };
 
@@ -110,7 +187,7 @@ const Analyze = () => {
             <Card className="p-8 mb-8 bg-gradient-card border-none shadow-soft animate-scale-in">
               <div className="space-y-4">
                 <Label htmlFor="image-upload" className="text-lg font-semibold">
-                  Upload Ingredient Photo
+                  Upload Food Image
                 </Label>
                 <div className="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-primary transition-colors cursor-pointer">
                   <input
@@ -119,20 +196,18 @@ const Analyze = () => {
                     accept="image/*"
                     onChange={handleImageUpload}
                     className="hidden"
+                    disabled={isAnalyzing}
                   />
                   <label htmlFor="image-upload" className="cursor-pointer">
                     {uploadedImage ? (
                       <div className="space-y-4">
                         <img 
                           src={uploadedImage} 
-                          alt="Uploaded ingredients" 
+                          alt="Uploaded food image" 
                           className="max-h-64 mx-auto rounded-lg shadow-soft"
                         />
                         <p className="text-sm text-muted-foreground">
                           Click to change image
-                        </p>
-                        <p className="text-xs text-accent font-medium">
-                          ML ingredient detection coming soon!
                         </p>
                       </div>
                     ) : (
@@ -141,13 +216,35 @@ const Analyze = () => {
                         <div>
                           <p className="text-lg font-medium">Click to upload image</p>
                           <p className="text-sm text-muted-foreground">
-                            or drag and drop
+                            or drag and drop (Max 7 MB)
                           </p>
                         </div>
                       </div>
                     )}
                   </label>
                 </div>
+                
+                {/* Analyze Button - shown when image is uploaded */}
+                {uploadedImage && (
+                  <Button
+                    onClick={handleAnalyzeImage}
+                    disabled={isAnalyzing}
+                    className="w-full gap-2"
+                    size="lg"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        Analyze Food
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
             </Card>
           )}

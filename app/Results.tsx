@@ -4,89 +4,88 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, TrendingUp, Sparkles } from "lucide-react";
+import { ArrowLeft, TrendingUp, Sparkles, Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, PieLabelRenderProps } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, PieLabelRenderProps, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
+import { AnalysisResult, BreakdownComponent } from "@/lib/types";
 
-interface Ingredient {
-  name: string;
-  quantity: number;
-}
-
-interface NutritionData {
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  fiber: number;
-}
+/**
+ * Color mapping for different component types in the breakdown chart
+ * This helps visualize different categories of food components
+ */
+const getComponentColor = (type: string, index: number): string => {
+  const colorMap: Record<string, string> = {
+    grain: "#F59E0B",      // Orange for grains
+    protein: "#EF4444",    // Red for proteins
+    vegetable: "#36946D",  // Green for vegetables
+    spice: "#8B5CF6",      // Purple for spices
+    dairy: "#3B82F6",      // Blue for dairy
+    other: "#6B7280",      // Gray for other
+  };
+  
+  // Fallback colors if type doesn't match
+  const fallbackColors = ["#F59E0B", "#EF4444", "#36946D", "#8B5CF6", "#3B82F6", "#6B7280"];
+  
+  return colorMap[type.toLowerCase()] || fallbackColors[index % fallbackColors.length];
+};
 
 interface ChartData {
   name: string;
   value: number;
   color: string;
-  [key: string]: string | number; // Add index signature
+  type: string;
+  [key: string]: string | number;
 }
 
 const Results = () => {
   const router = useRouter();
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [nutrition, setNutrition] = useState<NutritionData | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
+  /**
+   * Loads the analysis result from sessionStorage
+   * This result comes from the Gemini API analysis
+   */
   useEffect(() => {
-    const stored = sessionStorage.getItem("ingredients");
+    const stored = sessionStorage.getItem("analysisResult");
     if (stored) {
-      const parsed = JSON.parse(stored) as Ingredient[];
-      setIngredients(parsed);
-      
-      // Mock nutrition calculation (replace with API call)
-      const mockNutrition = calculateMockNutrition(parsed);
-      setNutrition(mockNutrition);
+      try {
+        const parsed = JSON.parse(stored) as AnalysisResult;
+        setAnalysisResult(parsed);
+      } catch (error) {
+        console.error("Failed to parse analysis result:", error);
+        router.push("/analyze");
+      }
     } else {
+      // No result found, redirect to analyze page
       router.push("/analyze");
     }
+    setIsLoading(false);
   }, [router]);
 
-  const calculateMockNutrition = (ingredients: Ingredient[]): NutritionData => {
-    // Mock calculation - replace with actual API call
-    const totalWeight = ingredients.reduce((sum, ing) => sum + ing.quantity, 0);
-    return {
-      calories: Math.round(totalWeight * 1.2),
-      protein: Math.round(totalWeight * 0.08),
-      carbs: Math.round(totalWeight * 0.25),
-      fat: Math.round(totalWeight * 0.05),
-      fiber: Math.round(totalWeight * 0.03),
-    };
-  };
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
-  if (!nutrition) {
+  if (!analysisResult) {
     return null;
   }
 
-  const chartData: ChartData[] = [
-    { name: "Protein", value: nutrition.protein, color: "#36946D" },
-    { name: "Carbs", value: nutrition.carbs, color: "#F59E0B" },
-    { name: "Fat", value: nutrition.fat, color: "#EF4444" },
-  ];
-
-  const suggestions = [
-    {
-      title: "Boost Protein",
-      description: "Add 50g paneer or tofu to increase protein by 8g",
-      icon: "🧀",
-    },
-    {
-      title: "Increase Fiber",
-      description: "Swap white rice with brown rice for +2g fiber",
-      icon: "🌾",
-    },
-    {
-      title: "Reduce Calories",
-      description: "Use less oil in cooking to save ~45 calories",
-      icon: "💧",
-    },
-  ];
+  /**
+   * Transform breakdown data for chart visualization
+   * Converts the breakdown array into chart-friendly format with colors
+   */
+  const chartData: ChartData[] = analysisResult.breakdown.map((item: BreakdownComponent, index: number) => ({
+    name: item.component,
+    value: item.percent,
+    type: item.type,
+    color: getComponentColor(item.type, index),
+  }));
 
   return (
     <div className="min-h-screen bg-background">
@@ -103,44 +102,41 @@ const Results = () => {
             Back to Analyze
           </Button>
 
+          {/* Food Identification Section */}
           <div className="text-center mb-8 animate-fade-in">
-            <h1 className="text-4xl font-bold mb-4">Nutrition Breakdown</h1>
+            <h1 className="text-4xl font-bold mb-2">{analysisResult.foodItem}</h1>
+            {analysisResult.alternatives && analysisResult.alternatives.length > 0 && (
+              <div className="flex flex-wrap gap-2 justify-center mb-4">
+                <span className="text-sm text-muted-foreground">Also known as:</span>
+                {analysisResult.alternatives.map((alt, index) => (
+                  <Badge key={index} variant="secondary" className="text-xs">
+                    {alt}
+                  </Badge>
+                ))}
+              </div>
+            )}
             <p className="text-lg text-muted-foreground">
-              Based on your ingredients
+              Food Analysis Results
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-8 mb-8">
-            {/* Summary Card */}
-            <Card className="p-8 bg-gradient-card border-none shadow-soft animate-scale-in">
-              <h2 className="text-2xl font-semibold mb-6">Total Nutrition</h2>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-4 bg-background rounded-lg">
-                  <span className="text-lg">Calories</span>
-                  <span className="text-2xl font-bold text-primary">{nutrition.calories} kcal</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-background rounded-lg">
-                  <span className="text-lg">Protein</span>
-                  <span className="text-2xl font-bold text-secondary">{nutrition.protein}g</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-background rounded-lg">
-                  <span className="text-lg">Carbohydrates</span>
-                  <span className="text-2xl font-bold text-accent">{nutrition.carbs}g</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-background rounded-lg">
-                  <span className="text-lg">Fat</span>
-                  <span className="text-2xl font-bold text-destructive">{nutrition.fat}g</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-background rounded-lg">
-                  <span className="text-lg">Fiber</span>
-                  <span className="text-2xl font-bold text-foreground">{nutrition.fiber}g</span>
-                </div>
-              </div>
-            </Card>
+          {/* Ingredients List */}
+          <Card className="p-8 mb-8 bg-gradient-card border-none shadow-soft animate-fade-in">
+            <h2 className="text-2xl font-semibold mb-6">Key Ingredients</h2>
+            <div className="flex flex-wrap gap-3">
+              {analysisResult.ingredients.map((ingredient, index) => (
+                <Badge key={index} variant="secondary" className="text-sm px-4 py-2">
+                  {ingredient}
+                </Badge>
+              ))}
+            </div>
+          </Card>
 
-            {/* Chart Card */}
+          {/* Breakdown Chart Section */}
+          <div className="grid md:grid-cols-2 gap-8 mb-8">
+            {/* Pie Chart Card */}
             <Card className="p-8 bg-gradient-card border-none shadow-soft animate-scale-in">
-              <h2 className="text-2xl font-semibold mb-6">Macronutrient Distribution</h2>
+              <h2 className="text-2xl font-semibold mb-6">Component Breakdown (Pie Chart)</h2>
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
@@ -150,7 +146,9 @@ const Results = () => {
                     labelLine={false}
                     label={(props: PieLabelRenderProps) => {
                       const entry = chartData[props.index];
-                      return `${entry.name} ${((entry.value / chartData.reduce((sum, e) => sum + e.value, 0)) * 100).toFixed(0)}%`;
+                      const total = chartData.reduce((sum, e) => sum + Number(e.value), 0);
+                      const percentage = total > 0 ? ((Number(entry.value) / total) * 100).toFixed(0) : 0;
+                      return `${entry.name}: ${percentage}%`;
                     }}
                     outerRadius={100}
                     fill="#8884d8"
@@ -160,36 +158,68 @@ const Results = () => {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip 
+                    formatter={(value: number) => `${value}%`}
+                    labelFormatter={(label) => `Component: ${label}`}
+                  />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
             </Card>
+
+            {/* Bar Chart Card */}
+            <Card className="p-8 bg-gradient-card border-none shadow-soft animate-scale-in">
+              <h2 className="text-2xl font-semibold mb-6">Component Breakdown (Bar Chart)</h2>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="name" 
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                  />
+                  <YAxis 
+                    label={{ value: 'Percentage (%)', angle: -90, position: 'insideLeft' }}
+                  />
+                  <Tooltip 
+                    formatter={(value: number) => `${value}%`}
+                    labelFormatter={(label) => `Component: ${label}`}
+                  />
+                  <Legend />
+                  <Bar dataKey="value" fill="#8884d8">
+                    {chartData.map((entry, index) => (
+                      <Cell key={`bar-cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
           </div>
 
-          {/* Ingredients Breakdown */}
+          {/* Component Breakdown Table */}
           <Card className="p-8 mb-8 bg-gradient-card border-none shadow-soft animate-fade-in">
-            <h2 className="text-2xl font-semibold mb-6">Ingredient Breakdown</h2>
+            <h2 className="text-2xl font-semibold mb-6">Component Breakdown Details</h2>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
-                    <th className="text-left py-3 px-4">Ingredient</th>
-                    <th className="text-right py-3 px-4">Quantity</th>
-                    <th className="text-right py-3 px-4">Calories</th>
-                    <th className="text-right py-3 px-4">Protein</th>
+                    <th className="text-left py-3 px-4">Component</th>
+                    <th className="text-left py-3 px-4">Type</th>
+                    <th className="text-right py-3 px-4">Percentage</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ingredients.map((ingredient, index) => (
+                  {analysisResult.breakdown.map((item, index) => (
                     <tr key={index} className="border-b border-border/50">
-                      <td className="py-3 px-4 capitalize">{ingredient.name}</td>
-                      <td className="text-right py-3 px-4">{ingredient.quantity}g</td>
-                      <td className="text-right py-3 px-4 text-primary font-medium">
-                        {Math.round(ingredient.quantity * 1.2)} kcal
+                      <td className="py-3 px-4 font-medium capitalize">{item.component}</td>
+                      <td className="py-3 px-4">
+                        <Badge variant="outline" className="capitalize">
+                          {item.type}
+                        </Badge>
                       </td>
-                      <td className="text-right py-3 px-4 text-secondary font-medium">
-                        {Math.round(ingredient.quantity * 0.08)}g
+                      <td className="text-right py-3 px-4 text-primary font-bold">
+                        {item.percent}%
                       </td>
                     </tr>
                   ))}
@@ -198,50 +228,15 @@ const Results = () => {
             </div>
           </Card>
 
-          {/* Suggestions */}
-          <div className="mb-8">
-            <div className="flex items-center gap-2 mb-6">
+          {/* Explanation Section */}
+          <Card className="p-8 mb-8 bg-gradient-card border-none shadow-soft animate-fade-in">
+            <div className="flex items-center gap-2 mb-4">
               <Sparkles className="h-6 w-6 text-primary" />
-              <h2 className="text-2xl font-semibold">Smart Suggestions</h2>
+              <h2 className="text-2xl font-semibold">Analysis Explanation</h2>
             </div>
-            <div className="grid md:grid-cols-3 gap-6">
-              {suggestions.map((suggestion, index) => (
-                <Card 
-                  key={index}
-                  className="p-6 bg-gradient-card border-none shadow-soft hover:shadow-hover transition-smooth animate-fade-in"
-                  style={{ animationDelay: `${index * 0.1}s` }}
-                >
-                  <div className="text-4xl mb-4">{suggestion.icon}</div>
-                  <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
-                    {suggestion.title}
-                    <Badge variant="secondary" className="text-xs">
-                      <TrendingUp className="h-3 w-3 mr-1" />
-                      Optimize
-                    </Badge>
-                  </h3>
-                  <p className="text-sm text-muted-foreground">{suggestion.description}</p>
-                </Card>
-              ))}
-            </div>
-          </div>
-
-          {/* Goal Filters */}
-          <Card className="p-6 bg-gradient-card border-none shadow-soft">
-            <h3 className="text-lg font-semibold mb-4">Filter by Goal</h3>
-            <div className="flex flex-wrap gap-3">
-              <Badge className="cursor-pointer hover:bg-secondary transition-colors px-4 py-2">
-                High Protein
-              </Badge>
-              <Badge className="cursor-pointer hover:bg-secondary transition-colors px-4 py-2">
-                High Fiber
-              </Badge>
-              <Badge className="cursor-pointer hover:bg-secondary transition-colors px-4 py-2">
-                Low Calorie
-              </Badge>
-              <Badge className="cursor-pointer hover:bg-secondary transition-colors px-4 py-2">
-                Low Carb
-              </Badge>
-            </div>
+            <p className="text-muted-foreground leading-relaxed">
+              {analysisResult.explanation}
+            </p>
           </Card>
         </div>
       </div>
