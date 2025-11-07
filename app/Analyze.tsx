@@ -100,42 +100,86 @@ const Analyze = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         
-        // Wait for video to be ready before allowing capture
-        videoRef.current.onloadedmetadata = () => {
-          if (videoRef.current) {
-            videoRef.current.play()
-              .then(() => {
-                // Additional check: wait for video to actually start playing
-                const checkVideoReady = () => {
-                  if (videoRef.current && 
-                      videoRef.current.readyState >= 2 && 
-                      videoRef.current.videoWidth > 0 && 
-                      videoRef.current.videoHeight > 0) {
+        // Simplified and more reliable approach for mobile
+        const checkVideoReady = () => {
+          const video = videoRef.current;
+          if (!video) return false;
+          
+          // More lenient check - just need video to be playing
+          if (video.readyState >= 1) {
+            // If we have dimensions, great. If not, still allow capture (dimensions might come later)
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+              setIsVideoReady(true);
+              return true;
+            } else if (video.readyState >= 2) {
+              // Video is playing but dimensions not set yet - still allow capture
+              setIsVideoReady(true);
+              return true;
+            }
+          }
+          return false;
+        };
+
+        // Try to play the video
+        const playVideo = async () => {
+          try {
+            if (videoRef.current) {
+              await videoRef.current.play();
+              
+              // Check immediately after play
+              if (checkVideoReady()) return;
+              
+              // If not ready, check periodically (max 2 seconds)
+              let attempts = 0;
+              const maxAttempts = 20; // 20 * 100ms = 2 seconds
+              const interval = setInterval(() => {
+                attempts++;
+                if (checkVideoReady() || attempts >= maxAttempts) {
+                  clearInterval(interval);
+                  // Final fallback: if video is playing, allow capture
+                  if (attempts >= maxAttempts && videoRef.current && videoRef.current.readyState >= 1) {
                     setIsVideoReady(true);
-                    toast.success("Camera ready!");
-                  } else {
-                    // Retry after a short delay
-                    setTimeout(checkVideoReady, 100);
                   }
-                };
-                checkVideoReady();
-              })
-              .catch((playError) => {
-                console.error("Error playing video:", playError);
-                toast.error("Failed to start camera preview.");
-                stopCamera();
-              });
+                }
+              }, 100);
+            }
+          } catch (playError) {
+            console.error("Error playing video:", playError);
+            toast.error("Failed to start camera preview.");
+            stopCamera();
           }
         };
 
-        // Handle video playing event
-        videoRef.current.onplaying = () => {
-          if (videoRef.current && 
-              videoRef.current.videoWidth > 0 && 
-              videoRef.current.videoHeight > 0) {
-            setIsVideoReady(true);
-          }
+        // Handle video loaded metadata
+        videoRef.current.onloadedmetadata = () => {
+          playVideo();
         };
+
+        // Handle video playing event (backup check)
+        videoRef.current.onplaying = () => {
+          checkVideoReady();
+        };
+
+        // Fallback: if events don't fire, try after a delay
+        setTimeout(() => {
+          if (videoRef.current && videoRef.current.readyState >= 1) {
+            playVideo();
+          }
+        }, 500);
+
+        // Ultimate fallback: after 1 second, if video is playing, set ready
+        setTimeout(() => {
+          if (videoRef.current && videoRef.current.readyState >= 1) {
+            // Use a function to check current state
+            setIsVideoReady((current) => {
+              if (!current) {
+                toast.success("Camera ready!");
+                return true;
+              }
+              return current;
+            });
+          }
+        }, 1000);
       }
 
     } catch (error) {
@@ -196,17 +240,21 @@ const Analyze = () => {
       return;
     }
 
-    // Check if video is actually playing and has valid dimensions
-    if (!isVideoReady || video.readyState < 2) {
+    // Check if video is playing (more lenient check)
+    if (video.readyState < 1) {
       toast.error("Camera is not ready yet. Please wait for the preview to load.");
       return;
     }
 
-    // Validate video dimensions (must be > 0)
-    if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0 || video.videoHeight === 0) {
-      toast.error("Video dimensions are invalid. Please try again.");
-      console.error("Video dimensions:", { width: video.videoWidth, height: video.videoHeight });
-      return;
+    // Get video dimensions or use defaults
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+    
+    // If dimensions are 0 or invalid, use video element dimensions as fallback
+    if (!width || !height || width === 0 || height === 0) {
+      width = video.clientWidth || 640;
+      height = video.clientHeight || 480;
+      console.warn("Using fallback dimensions:", { width, height });
     }
 
     if (!canvas) {
@@ -222,8 +270,8 @@ const Analyze = () => {
 
     try {
       // Set canvas dimensions to match video (mobile-friendly)
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = width;
+      canvas.height = height;
 
       // Draw the current video frame to canvas
       // Note: The video display is mirrored (scaleX(-1)) for UX, but the stream data is not
@@ -606,7 +654,7 @@ const Analyze = () => {
                 <canvas ref={canvasRef} className="hidden" />
 
                 {/* Analyze Button - shown when image is captured */}
-                {capturedImage && (
+                {(capturedImage || uploadedImage) && (
                   <Button
                     onClick={handleAnalyzeImage}
                     disabled={isAnalyzing}
