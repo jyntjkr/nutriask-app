@@ -87,8 +87,8 @@ const Analyze = () => {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment", // Use back camera on mobile devices
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
         audio: false,
       });
@@ -99,87 +99,45 @@ const Analyze = () => {
       // Display the video stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        
-        // Simplified and more reliable approach for mobile
-        const checkVideoReady = () => {
-          const video = videoRef.current;
-          if (!video) return false;
-          
-          // More lenient check - just need video to be playing
-          if (video.readyState >= 1) {
-            // If we have dimensions, great. If not, still allow capture (dimensions might come later)
-            if (video.videoWidth > 0 && video.videoHeight > 0) {
-              setIsVideoReady(true);
-              return true;
-            } else if (video.readyState >= 2) {
-              // Video is playing but dimensions not set yet - still allow capture
-              setIsVideoReady(true);
-              return true;
-            }
-          }
-          return false;
-        };
 
-        // Try to play the video
-        const playVideo = async () => {
-          try {
-            if (videoRef.current) {
-              await videoRef.current.play();
-              
-              // Check immediately after play
-              if (checkVideoReady()) return;
-              
-              // If not ready, check periodically (max 2 seconds)
-              let attempts = 0;
-              const maxAttempts = 20; // 20 * 100ms = 2 seconds
-              const interval = setInterval(() => {
-                attempts++;
-                if (checkVideoReady() || attempts >= maxAttempts) {
-                  clearInterval(interval);
-                  // Final fallback: if video is playing, allow capture
-                  if (attempts >= maxAttempts && videoRef.current && videoRef.current.readyState >= 1) {
-                    setIsVideoReady(true);
-                  }
-                }
-              }, 100);
-            }
-          } catch (playError) {
-            console.error("Error playing video:", playError);
-            toast.error("Failed to start camera preview.");
-            stopCamera();
+        let readyTimeout: NodeJS.Timeout;
+        let metadataHandler: (() => void) | null = null;
+
+        // Cleanup function
+        const cleanup = () => {
+          if (readyTimeout) clearTimeout(readyTimeout);
+          if (metadataHandler && videoRef.current) {
+            videoRef.current.removeEventListener("loadedmetadata", metadataHandler);
           }
         };
 
-        // Handle video loaded metadata
-        videoRef.current.onloadedmetadata = () => {
-          playVideo();
+        // Handler for when metadata loads
+        metadataHandler = () => {
+          cleanup();
+          setIsVideoReady(true);
+          toast.success("Camera ready!");
         };
 
-        // Handle video playing event (backup check)
-        videoRef.current.onplaying = () => {
-          checkVideoReady();
-        };
+        // Add the event listener
+        videoRef.current.addEventListener("loadedmetadata", metadataHandler);
 
-        // Fallback: if events don't fire, try after a delay
-        setTimeout(() => {
-          if (videoRef.current && videoRef.current.readyState >= 1) {
-            playVideo();
-          }
-        }, 500);
+        // Fallback timeout - if metadata doesn't load in 2 seconds, force ready state
+        readyTimeout = setTimeout(() => {
+          cleanup();
+          setIsVideoReady(true);
+          console.warn("Camera ready state forced by timeout");
+        }, 2000);
 
-        // Ultimate fallback: after 1 second, if video is playing, set ready
-        setTimeout(() => {
-          if (videoRef.current && videoRef.current.readyState >= 1) {
-            // Use a function to check current state
-            setIsVideoReady((current) => {
-              if (!current) {
-                toast.success("Camera ready!");
-                return true;
-              }
-              return current;
-            });
+        // Try to play video
+        try {
+          const playPromise = videoRef.current.play();
+          if (playPromise !== undefined) {
+            await playPromise;
           }
-        }, 1000);
+        } catch (playError) {
+          console.warn("Video autoplay failed:", playError);
+          // Continue anyway - video might still work
+        }
       }
 
     } catch (error) {
@@ -234,33 +192,14 @@ const Analyze = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
-    // Validate video element exists and is ready
-    if (!video) {
-      toast.error("Camera not initialized. Please start the camera first.");
+    if (!video || !canvas) {
+      toast.error("Camera not properly initialized. Please try again.");
       return;
     }
 
-    // Check if video is playing (more lenient check)
-    if (video.readyState < 1) {
-      toast.error("Camera is not ready yet. Please wait for the preview to load.");
-      return;
-    }
-
-    // Get video dimensions or use defaults
-    let width = video.videoWidth;
-    let height = video.videoHeight;
-    
-    // If dimensions are 0 or invalid, use video element dimensions as fallback
-    if (!width || !height || width === 0 || height === 0) {
-      width = video.clientWidth || 640;
-      height = video.clientHeight || 480;
-      console.warn("Using fallback dimensions:", { width, height });
-    }
-
-    if (!canvas) {
-      toast.error("Canvas not available. Please refresh the page.");
-      return;
-    }
+    // Use video element dimensions with reasonable fallbacks
+    let width = video.videoWidth || video.clientWidth || 640;
+    let height = video.videoHeight || video.clientHeight || 480;
 
     const context = canvas.getContext("2d");
     if (!context) {
@@ -269,47 +208,35 @@ const Analyze = () => {
     }
 
     try {
-      // Set canvas dimensions to match video (mobile-friendly)
       canvas.width = width;
       canvas.height = height;
 
       // Draw the current video frame to canvas
-      // Note: The video display is mirrored (scaleX(-1)) for UX, but the stream data is not
-      // So the captured image will be the original (non-mirrored) which is correct
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       // Convert canvas to blob, then to File
       canvas.toBlob(
         (blob) => {
-          if (!blob) {
-            toast.error("Failed to convert photo to image.");
+          if (!blob || blob.size === 0) {
+            toast.error("Failed to capture photo. Please try again.");
             return;
           }
 
-          // Validate blob size (should be > 0)
-          if (blob.size === 0) {
-            toast.error("Captured image is empty. Please try again.");
-            return;
-          }
-
-          // Create a File object from the blob
           const file = new File([blob], "captured-photo.jpg", {
             type: "image/jpeg",
           });
 
-          // Create preview URL
           const imageUrl = URL.createObjectURL(blob);
           setCapturedImage(imageUrl);
           setUploadedImage(imageUrl);
           setUploadedFile(file);
 
-          // Stop camera after capture
           stopCamera();
 
           toast.success("Photo captured! Click 'Analyze' to identify the food.");
         },
         "image/jpeg",
-        0.95 // Quality: 95%
+        0.95
       );
     } catch (error) {
       console.error("Error capturing photo:", error);
