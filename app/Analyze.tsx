@@ -28,6 +28,7 @@ const Analyze = () => {
   
   // Camera-related state
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -70,6 +71,7 @@ const Analyze = () => {
   /**
    * Starts the camera stream using MediaDevices API
    * Requests access to user's camera and displays live preview
+   * Mobile-first approach with proper video ready state handling
    */
   const startCamera = async () => {
     try {
@@ -79,12 +81,14 @@ const Analyze = () => {
         return;
       }
 
-      // Request camera access
+      setIsVideoReady(false);
+
+      // Request camera access - mobile-first settings
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment", // Use back camera on mobile devices
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
         },
         audio: false,
       });
@@ -95,20 +99,62 @@ const Analyze = () => {
       // Display the video stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        
+        // Wait for video to be ready before allowing capture
+        videoRef.current.onloadedmetadata = () => {
+          if (videoRef.current) {
+            videoRef.current.play()
+              .then(() => {
+                // Additional check: wait for video to actually start playing
+                const checkVideoReady = () => {
+                  if (videoRef.current && 
+                      videoRef.current.readyState >= 2 && 
+                      videoRef.current.videoWidth > 0 && 
+                      videoRef.current.videoHeight > 0) {
+                    setIsVideoReady(true);
+                    toast.success("Camera ready!");
+                  } else {
+                    // Retry after a short delay
+                    setTimeout(checkVideoReady, 100);
+                  }
+                };
+                checkVideoReady();
+              })
+              .catch((playError) => {
+                console.error("Error playing video:", playError);
+                toast.error("Failed to start camera preview.");
+                stopCamera();
+              });
+          }
+        };
+
+        // Handle video playing event
+        videoRef.current.onplaying = () => {
+          if (videoRef.current && 
+              videoRef.current.videoWidth > 0 && 
+              videoRef.current.videoHeight > 0) {
+            setIsVideoReady(true);
+          }
+        };
       }
 
-      toast.success("Camera activated!");
     } catch (error) {
       console.error("Error accessing camera:", error);
+      setIsCameraActive(false);
+      setIsVideoReady(false);
+      
       if (error instanceof Error) {
-        if (error.name === "NotAllowedError") {
-          toast.error("Camera access denied. Please allow camera permissions.");
-        } else if (error.name === "NotFoundError") {
+        if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+          toast.error("Camera access denied. Please allow camera permissions in your browser settings.");
+        } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
           toast.error("No camera found on your device.");
+        } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+          toast.error("Camera is already in use by another application.");
         } else {
-          toast.error("Failed to access camera. Please try again.");
+          toast.error(`Failed to access camera: ${error.message}`);
         }
+      } else {
+        toast.error("Failed to access camera. Please try again.");
       }
     }
   };
@@ -124,66 +170,103 @@ const Analyze = () => {
       streamRef.current = null;
     }
     setIsCameraActive(false);
+    setIsVideoReady(false);
     setCapturedImage(null);
     
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+      // Remove event listeners
+      videoRef.current.onloadedmetadata = null;
+      videoRef.current.onplaying = null;
     }
   }, []);
 
   /**
    * Captures a photo from the live camera stream
    * Converts video frame to image and prepares it for analysis
+   * Mobile-first approach with proper validation
    */
   const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) {
-      toast.error("Camera not ready. Please try again.");
-      return;
-    }
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
 
-    if (!context) {
-      toast.error("Failed to capture photo.");
+    // Validate video element exists and is ready
+    if (!video) {
+      toast.error("Camera not initialized. Please start the camera first.");
       return;
     }
 
-    // Set canvas dimensions to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Check if video is actually playing and has valid dimensions
+    if (!isVideoReady || video.readyState < 2) {
+      toast.error("Camera is not ready yet. Please wait for the preview to load.");
+      return;
+    }
 
-    // Draw the current video frame to canvas
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Validate video dimensions (must be > 0)
+    if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0 || video.videoHeight === 0) {
+      toast.error("Video dimensions are invalid. Please try again.");
+      console.error("Video dimensions:", { width: video.videoWidth, height: video.videoHeight });
+      return;
+    }
 
-    // Convert canvas to blob, then to File
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          toast.error("Failed to capture photo.");
-          return;
-        }
+    if (!canvas) {
+      toast.error("Canvas not available. Please refresh the page.");
+      return;
+    }
 
-        // Create a File object from the blob
-        const file = new File([blob], "captured-photo.jpg", {
-          type: "image/jpeg",
-        });
+    const context = canvas.getContext("2d");
+    if (!context) {
+      toast.error("Failed to get canvas context.");
+      return;
+    }
 
-        // Create preview URL
-        const imageUrl = URL.createObjectURL(blob);
-        setCapturedImage(imageUrl);
-        setUploadedImage(imageUrl);
-        setUploadedFile(file);
+    try {
+      // Set canvas dimensions to match video (mobile-friendly)
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-        // Stop camera after capture
-        stopCamera();
+      // Draw the current video frame to canvas
+      // Note: The video display is mirrored (scaleX(-1)) for UX, but the stream data is not
+      // So the captured image will be the original (non-mirrored) which is correct
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        toast.success("Photo captured! Click 'Analyze' to identify the food.");
-      },
-      "image/jpeg",
-      0.95 // Quality: 95%
-    );
+      // Convert canvas to blob, then to File
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            toast.error("Failed to convert photo to image.");
+            return;
+          }
+
+          // Validate blob size (should be > 0)
+          if (blob.size === 0) {
+            toast.error("Captured image is empty. Please try again.");
+            return;
+          }
+
+          // Create a File object from the blob
+          const file = new File([blob], "captured-photo.jpg", {
+            type: "image/jpeg",
+          });
+
+          // Create preview URL
+          const imageUrl = URL.createObjectURL(blob);
+          setCapturedImage(imageUrl);
+          setUploadedImage(imageUrl);
+          setUploadedFile(file);
+
+          // Stop camera after capture
+          stopCamera();
+
+          toast.success("Photo captured! Click 'Analyze' to identify the food.");
+        },
+        "image/jpeg",
+        0.95 // Quality: 95%
+      );
+    } catch (error) {
+      console.error("Error capturing photo:", error);
+      toast.error("Failed to capture photo. Please try again.");
+    }
   };
 
   /**
@@ -470,17 +553,33 @@ const Analyze = () => {
                         playsInline
                         muted
                         className="w-full max-h-96 object-contain"
+                        style={{ 
+                          transform: 'scaleX(-1)', // Mirror the video for better UX
+                          WebkitTransform: 'scaleX(-1)'
+                        }}
                       />
-                      {/* Capture Button Overlay */}
-                      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
-                        <Button
-                          onClick={capturePhoto}
-                          size="lg"
-                          className="rounded-full w-16 h-16 p-0 bg-white hover:bg-gray-100 border-4 border-primary shadow-lg"
-                        >
-                          <Circle className="h-8 w-8 text-primary fill-primary" />
-                        </Button>
-                      </div>
+                      {/* Loading indicator */}
+                      {!isVideoReady && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                          <div className="text-center space-y-2">
+                            <Loader2 className="h-8 w-8 animate-spin text-white mx-auto" />
+                            <p className="text-white text-sm">Starting camera...</p>
+                          </div>
+                        </div>
+                      )}
+                      {/* Capture Button Overlay - only show when video is ready */}
+                      {isVideoReady && (
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10">
+                          <Button
+                            onClick={capturePhoto}
+                            size="lg"
+                            className="rounded-full w-16 h-16 p-0 bg-white hover:bg-gray-100 border-4 border-primary shadow-lg active:scale-95 transition-transform"
+                            disabled={!isVideoReady}
+                          >
+                            <Circle className="h-8 w-8 text-primary fill-primary" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="p-12 text-center space-y-4">
