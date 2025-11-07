@@ -1,12 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, Type, ArrowRight, X, Loader2 } from "lucide-react";
+import { Upload, Type, ArrowRight, X, Loader2, Camera, CameraOff, Circle } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { toast } from "sonner";
@@ -19,12 +19,19 @@ interface Ingredient {
 
 const Analyze = () => {
   const router = useRouter();
-  const [inputMethod, setInputMethod] = useState<"upload" | "text">("upload");
+  const [inputMethod, setInputMethod] = useState<"upload" | "camera" | "text">("upload");
   const [ingredientText, setIngredientText] = useState("");
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Camera-related state
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   /**
    * Handles image file upload
@@ -61,12 +68,131 @@ const Analyze = () => {
   };
 
   /**
-   * Sends the uploaded image to the Gemini API for analysis
+   * Starts the camera stream using MediaDevices API
+   * Requests access to user's camera and displays live preview
+   */
+  const startCamera = async () => {
+    try {
+      // Check if browser supports getUserMedia
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast.error("Camera access is not supported in your browser.");
+        return;
+      }
+
+      // Request camera access
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment", // Use back camera on mobile devices
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      setIsCameraActive(true);
+
+      // Display the video stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+
+      toast.success("Camera activated!");
+    } catch (error) {
+      console.error("Error accessing camera:", error);
+      if (error instanceof Error) {
+        if (error.name === "NotAllowedError") {
+          toast.error("Camera access denied. Please allow camera permissions.");
+        } else if (error.name === "NotFoundError") {
+          toast.error("No camera found on your device.");
+        } else {
+          toast.error("Failed to access camera. Please try again.");
+        }
+      }
+    }
+  };
+
+  /**
+   * Stops the camera stream and cleans up resources
+   */
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        track.stop();
+      });
+      streamRef.current = null;
+    }
+    setIsCameraActive(false);
+    setCapturedImage(null);
+    
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  /**
+   * Captures a photo from the live camera stream
+   * Converts video frame to image and prepares it for analysis
+   */
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) {
+      toast.error("Camera not ready. Please try again.");
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      toast.error("Failed to capture photo.");
+      return;
+    }
+
+    // Set canvas dimensions to match video
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Draw the current video frame to canvas
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Convert canvas to blob, then to File
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          toast.error("Failed to capture photo.");
+          return;
+        }
+
+        // Create a File object from the blob
+        const file = new File([blob], "captured-photo.jpg", {
+          type: "image/jpeg",
+        });
+
+        // Create preview URL
+        const imageUrl = URL.createObjectURL(blob);
+        setCapturedImage(imageUrl);
+        setUploadedImage(imageUrl);
+        setUploadedFile(file);
+
+        // Stop camera after capture
+        stopCamera();
+
+        toast.success("Photo captured! Click 'Analyze' to identify the food.");
+      },
+      "image/jpeg",
+      0.95 // Quality: 95%
+    );
+  };
+
+  /**
+   * Sends the uploaded/captured image to the Gemini API for analysis
    * Handles loading states, errors, and response parsing
    */
   const handleAnalyzeImage = async () => {
     if (!uploadedFile) {
-      toast.error("Please upload an image first.");
+      toast.error("Please upload or capture an image first.");
       return;
     }
 
@@ -111,6 +237,34 @@ const Analyze = () => {
       setIsAnalyzing(false);
     }
   };
+
+  /**
+   * Cleanup: Stop camera when component unmounts
+   */
+  useEffect(() => {
+    return () => {
+      // Stop camera stream if active
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          track.stop();
+        });
+        streamRef.current = null;
+      }
+      // Clean up captured image URL
+      if (capturedImage) {
+        URL.revokeObjectURL(capturedImage);
+      }
+    };
+  }, [capturedImage]);
+
+  /**
+   * Stop camera when switching away from camera mode
+   */
+  useEffect(() => {
+    if (inputMethod !== "camera" && isCameraActive) {
+      stopCamera();
+    }
+  }, [inputMethod, isCameraActive, stopCamera]);
 
   const handleParseIngredients = () => {
     const parsed = ingredientText
@@ -163,7 +317,7 @@ const Analyze = () => {
           </div>
 
           {/* Input Method Selector */}
-          <div className="flex gap-4 mb-8 justify-center">
+          <div className="flex gap-4 mb-8 justify-center flex-wrap">
             <Button
               variant={inputMethod === "upload" ? "default" : "outline"}
               onClick={() => setInputMethod("upload")}
@@ -171,6 +325,19 @@ const Analyze = () => {
             >
               <Upload className="h-4 w-4" />
               Upload Image
+            </Button>
+            <Button
+              variant={inputMethod === "camera" ? "default" : "outline"}
+              onClick={() => {
+                setInputMethod("camera");
+                if (!isCameraActive) {
+                  startCamera();
+                }
+              }}
+              className="gap-2"
+            >
+              <Camera className="h-4 w-4" />
+              Use Camera
             </Button>
             <Button
               variant={inputMethod === "text" ? "default" : "outline"}
@@ -226,6 +393,121 @@ const Analyze = () => {
                 
                 {/* Analyze Button - shown when image is uploaded */}
                 {uploadedImage && (
+                  <Button
+                    onClick={handleAnalyzeImage}
+                    disabled={isAnalyzing}
+                    className="w-full gap-2"
+                    size="lg"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        Analyze Food
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {/* Camera Section */}
+          {inputMethod === "camera" && (
+            <Card className="p-8 mb-8 bg-gradient-card border-none shadow-soft animate-scale-in">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-lg font-semibold">
+                    Capture Food Image
+                  </Label>
+                  {isCameraActive && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={stopCamera}
+                      className="gap-2"
+                    >
+                      <CameraOff className="h-4 w-4" />
+                      Stop Camera
+                    </Button>
+                  )}
+                </div>
+
+                {/* Camera Preview or Captured Image */}
+                <div className="border-2 border-border rounded-lg overflow-hidden bg-black">
+                  {capturedImage ? (
+                    <div className="space-y-4 p-4">
+                      <img 
+                        src={capturedImage} 
+                        alt="Captured food image" 
+                        className="max-h-96 mx-auto rounded-lg shadow-soft w-full object-contain"
+                      />
+                      <div className="flex gap-2 justify-center">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setCapturedImage(null);
+                            setUploadedImage(null);
+                            setUploadedFile(null);
+                            startCamera();
+                          }}
+                          className="gap-2"
+                        >
+                          <Camera className="h-4 w-4" />
+                          Retake
+                        </Button>
+                      </div>
+                    </div>
+                  ) : isCameraActive ? (
+                    <div className="relative">
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full max-h-96 object-contain"
+                      />
+                      {/* Capture Button Overlay */}
+                      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                        <Button
+                          onClick={capturePhoto}
+                          size="lg"
+                          className="rounded-full w-16 h-16 p-0 bg-white hover:bg-gray-100 border-4 border-primary shadow-lg"
+                        >
+                          <Circle className="h-8 w-8 text-primary fill-primary" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-12 text-center space-y-4">
+                      <Camera className="h-16 w-16 mx-auto text-muted-foreground" />
+                      <div>
+                        <p className="text-lg font-medium">Camera Ready</p>
+                        <p className="text-sm text-muted-foreground">
+                          Click "Start Camera" to begin
+                        </p>
+                      </div>
+                      <Button
+                        onClick={startCamera}
+                        className="gap-2"
+                        size="lg"
+                      >
+                        <Camera className="h-4 w-4" />
+                        Start Camera
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Hidden canvas for capturing frames */}
+                <canvas ref={canvasRef} className="hidden" />
+
+                {/* Analyze Button - shown when image is captured */}
+                {capturedImage && (
                   <Button
                     onClick={handleAnalyzeImage}
                     disabled={isAnalyzing}
