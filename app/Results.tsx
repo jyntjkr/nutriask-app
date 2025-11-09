@@ -9,6 +9,8 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, PieLabelRenderProps, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { AnalysisResult, BreakdownComponent } from "@/lib/types";
+import { NutritionResult } from "@/lib/nutrition";
+import NutrientDisplay from "@/components/NutrientDisplay";
 
 /**
  * Color mapping for different component types in the breakdown chart
@@ -41,20 +43,68 @@ interface ChartData {
 const Results = () => {
   const router = useRouter();
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [nutritionResult, setNutritionResult] = useState<NutritionResult | null>(null);
+  const [resultType, setResultType] = useState<"analysis" | "nutrition" | "combined" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   /**
-   * Loads the analysis result from sessionStorage
-   * This result comes from the Gemini API analysis
+   * Loads the result from sessionStorage
+   * Can be either an analysis result, nutrition result, or combined
    */
   useEffect(() => {
-    const stored = sessionStorage.getItem("analysisResult");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as AnalysisResult;
-        setAnalysisResult(parsed);
-      } catch (error) {
-        console.error("Failed to parse analysis result:", error);
+    const type = sessionStorage.getItem("resultType");
+    setResultType(type as "analysis" | "nutrition" | "combined" | null);
+
+    if (type === "analysis") {
+      const stored = sessionStorage.getItem("analysisResult");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as AnalysisResult;
+          setAnalysisResult(parsed);
+        } catch (error) {
+          console.error("Failed to parse analysis result:", error);
+          router.push("/analyze");
+        }
+      } else {
+        router.push("/analyze");
+      }
+    } else if (type === "nutrition") {
+      const stored = sessionStorage.getItem("nutritionResult");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as NutritionResult;
+          setNutritionResult(parsed);
+        } catch (error) {
+          console.error("Failed to parse nutrition result:", error);
+          router.push("/analyze");
+        }
+      } else {
+        router.push("/analyze");
+      }
+    } else if (type === "combined") {
+      // Load both results
+      const analysisStored = sessionStorage.getItem("analysisResult");
+      const nutritionStored = sessionStorage.getItem("nutritionResult");
+      
+      if (analysisStored) {
+        try {
+          const parsed = JSON.parse(analysisStored) as AnalysisResult;
+          setAnalysisResult(parsed);
+        } catch (error) {
+          console.error("Failed to parse analysis result:", error);
+        }
+      }
+      
+      if (nutritionStored) {
+        try {
+          const parsed = JSON.parse(nutritionStored) as NutritionResult;
+          setNutritionResult(parsed);
+        } catch (error) {
+          console.error("Failed to parse nutrition result:", error);
+        }
+      }
+      
+      if (!analysisStored && !nutritionStored) {
         router.push("/analyze");
       }
     } else {
@@ -72,7 +122,39 @@ const Results = () => {
     );
   }
 
-  if (!analysisResult) {
+  // Render nutrition-only result if available
+  if (resultType === "nutrition" && nutritionResult && !analysisResult) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        
+        <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8">
+          <div className="container mx-auto max-w-6xl">
+            <Button
+              variant="ghost"
+              onClick={() => router.push("/analyze")}
+              className="mb-6 gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Analyze
+            </Button>
+
+            <NutrientDisplay 
+              result={nutritionResult}
+              title="Nutrition Analysis"
+            />
+          </div>
+        </div>
+
+        <Footer />
+      </div>
+    );
+  }
+
+  // Render analysis result (with optional nutrition data)
+  if ((resultType === "analysis" || resultType === "combined") && analysisResult) {
+    // Continue with analysis rendering below...
+  } else {
     return null;
   }
 
@@ -130,6 +212,13 @@ const Results = () => {
                 </Badge>
               ))}
             </div>
+            {nutritionResult && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-sm text-muted-foreground">
+                  These ingredients are used for nutrition calculation below.
+                </p>
+              </div>
+            )}
           </Card>
 
           {/* Breakdown Chart Section */}
@@ -238,6 +327,16 @@ const Results = () => {
               {analysisResult.explanation}
             </p>
           </Card>
+
+          {/* Nutrition Data Section - shown when nutrition result is available */}
+          {nutritionResult && (
+            <div className="mb-8 animate-fade-in">
+              <NutrientDisplay 
+                result={nutritionResult}
+                title="Detailed Nutrition Information"
+              />
+            </div>
+          )}
         </div>
       </div>
 

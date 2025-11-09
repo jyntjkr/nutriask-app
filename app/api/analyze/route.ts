@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AnalysisResult, AnalysisError } from "@/lib/types";
+import { calculateNutrition } from "@/lib/nutrition";
 
 /**
  * API Route: /api/analyze
@@ -267,8 +268,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Return the successfully parsed analysis result
-    return NextResponse.json<AnalysisResult>(analysisResult, { status: 200 });
+    // Calculate nutrients based on the ingredients
+    const nutritionResult = calculateNutrition(analysisResult.ingredients);
+
+    // Return the successfully parsed analysis result with nutrients
+    return NextResponse.json({
+      ...analysisResult,
+      nutrients: nutritionResult
+    }, { status: 200 });
 
   } catch (error) {
     // Handle unexpected errors

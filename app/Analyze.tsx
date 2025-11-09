@@ -245,8 +245,10 @@ const Analyze = () => {
   };
 
   /**
-   * Sends the uploaded/captured image to the Gemini API for analysis
-   * Handles loading states, errors, and response parsing
+   * Combined handler that:
+   * 1. Extracts ingredients from image and matches to nutrition database
+   * 2. Performs full food analysis
+   * 3. Combines both results for display
    */
   const handleAnalyzeImage = async () => {
     if (!uploadedFile) {
@@ -255,34 +257,40 @@ const Analyze = () => {
     }
 
     setIsAnalyzing(true);
-    toast.loading("Analyzing image...", { id: "analyzing" });
+    toast.loading("Analyzing food and calculating nutrition...", { id: "analyzing" });
 
     try {
       // Create FormData to send the image file
       const formData = new FormData();
       formData.append("image", uploadedFile);
 
-      // Call the API route
-      const response = await fetch("/api/analyze", {
+      // Perform full food analysis (this already includes nutrition calculation)
+      const analysisResponse = await fetch("/api/analyze", {
         method: "POST",
         body: formData,
       });
 
-      const data = await response.json();
+      const analysisData = await analysisResponse.json();
 
-      if (!response.ok) {
-        // Handle API errors
-        const error = data as { error: string; message: string; details?: string };
+      if (!analysisResponse.ok) {
+        const error = analysisData as { error: string; message: string; details?: string };
         toast.error(error.message || "Failed to analyze image", { id: "analyzing" });
         setIsAnalyzing(false);
         return;
       }
 
-      // Success: Parse the analysis result
-      const analysisResult = data as AnalysisResult;
+      // Success: The analysis result already includes nutrition data
+      const analysisResult = analysisData as AnalysisResult;
       
-      // Store the result in sessionStorage for the results page
+      // Extract nutrition data from the analysis result
+      // The analysis API already calculated nutrition based on the same ingredients
+      if (analysisResult.nutrients) {
+        sessionStorage.setItem("nutritionResult", JSON.stringify(analysisResult.nutrients));
+      }
+      
+      // Store the analysis result
       sessionStorage.setItem("analysisResult", JSON.stringify(analysisResult));
+      sessionStorage.setItem("resultType", "combined");
       
       toast.success("Analysis complete!", { id: "analyzing" });
       
@@ -350,15 +358,55 @@ const Analyze = () => {
     setIngredients(ingredients.filter((_, i) => i !== index));
   };
 
-  const handleCalculate = () => {
+  const handleCalculate = async () => {
     if (ingredients.length === 0) {
       toast.error("Please add some ingredients first!");
       return;
     }
     
-    // Store ingredients in sessionStorage for the results page
-    sessionStorage.setItem("ingredients", JSON.stringify(ingredients));
-    router.push("/results");
+    setIsAnalyzing(true);
+    toast.loading("Calculating nutrition...", { id: "calculating" });
+
+    try {
+      // Extract ingredient names and quantities
+      const ingredientNames = ingredients.map(ing => ing.name);
+      const quantities = ingredients.map(ing => ing.quantity);
+
+      // Call the text ingredients API
+      const response = await fetch("/api/ingredients/text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ingredients: ingredientNames,
+          quantities: quantities,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const error = data as { error: string; message: string; details?: string };
+        toast.error(error.message || "Failed to calculate nutrition", { id: "calculating" });
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Store the nutrition result in sessionStorage
+      sessionStorage.setItem("nutritionResult", JSON.stringify(data));
+      sessionStorage.setItem("resultType", "nutrition");
+      
+      toast.success("Nutrition calculated!", { id: "calculating" });
+      
+      // Navigate to results page
+      router.push("/results");
+
+    } catch (error) {
+      console.error("Error calculating nutrition:", error);
+      toast.error("An unexpected error occurred. Please try again.", { id: "calculating" });
+      setIsAnalyzing(false);
+    }
   };
 
   return (

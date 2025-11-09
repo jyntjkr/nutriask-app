@@ -16,6 +16,28 @@ export interface AnalysisResult {
   breakdown: BreakdownComponent[];
   explanation: string;
   confidence?: number; // Optional confidence score if provided by model
+  nutrients?: {
+    aggregated: {
+      protein: number;
+      fat: number;
+      fiber: number;
+      carbs: number;
+      calories: number;
+    };
+    items: Array<{
+      input: string;
+      match: string;
+      nutrients: {
+        foodName: string;
+        protein: number;
+        fat: number;
+        fiber: number;
+        carbs: number;
+        calories: number;
+      };
+      confidence?: number;
+    }>;
+  };
 }
 
 /**
