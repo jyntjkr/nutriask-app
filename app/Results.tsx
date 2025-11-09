@@ -8,9 +8,10 @@ import { ArrowLeft, TrendingUp, Sparkles, Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, PieLabelRenderProps, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
-import { AnalysisResult, BreakdownComponent } from "@/lib/types";
+import { AnalysisResult, BreakdownComponent, IngredientSuggestion } from "@/lib/types";
 import { NutritionResult } from "@/lib/nutrition";
 import NutrientDisplay from "@/components/NutrientDisplay";
+import SuggestionList from "@/components/SuggestionList";
 
 /**
  * Color mapping for different component types in the breakdown chart
@@ -44,6 +45,7 @@ const Results = () => {
   const router = useRouter();
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [nutritionResult, setNutritionResult] = useState<NutritionResult | null>(null);
+  const [suggestions, setSuggestions] = useState<IngredientSuggestion[]>([]);
   const [resultType, setResultType] = useState<"analysis" | "nutrition" | "combined" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -70,6 +72,8 @@ const Results = () => {
       }
     } else if (type === "nutrition") {
       const stored = sessionStorage.getItem("nutritionResult");
+      const suggestionsStored = sessionStorage.getItem("suggestions");
+      
       if (stored) {
         try {
           const parsed = JSON.parse(stored) as NutritionResult;
@@ -81,15 +85,30 @@ const Results = () => {
       } else {
         router.push("/analyze");
       }
+      
+      // Load suggestions if available
+      if (suggestionsStored) {
+        try {
+          const parsed = JSON.parse(suggestionsStored) as IngredientSuggestion[];
+          setSuggestions(parsed);
+        } catch (error) {
+          console.error("Failed to parse suggestions:", error);
+        }
+      }
     } else if (type === "combined") {
       // Load both results
       const analysisStored = sessionStorage.getItem("analysisResult");
       const nutritionStored = sessionStorage.getItem("nutritionResult");
+      const suggestionsStored = sessionStorage.getItem("suggestions");
       
       if (analysisStored) {
         try {
           const parsed = JSON.parse(analysisStored) as AnalysisResult;
           setAnalysisResult(parsed);
+          // Extract suggestions from analysis result if available
+          if (parsed.suggestions) {
+            setSuggestions(parsed.suggestions);
+          }
         } catch (error) {
           console.error("Failed to parse analysis result:", error);
         }
@@ -101,6 +120,16 @@ const Results = () => {
           setNutritionResult(parsed);
         } catch (error) {
           console.error("Failed to parse nutrition result:", error);
+        }
+      }
+      
+      // Load suggestions from separate storage if available
+      if (suggestionsStored) {
+        try {
+          const parsed = JSON.parse(suggestionsStored) as IngredientSuggestion[];
+          setSuggestions(parsed);
+        } catch (error) {
+          console.error("Failed to parse suggestions:", error);
         }
       }
       
@@ -143,6 +172,13 @@ const Results = () => {
               result={nutritionResult}
               title="Nutrition Analysis"
             />
+            
+            {/* Show suggestions if available */}
+            {suggestions.length > 0 && (
+              <div className="mt-8">
+                <SuggestionList suggestions={suggestions} />
+              </div>
+            )}
           </div>
         </div>
 
@@ -335,6 +371,13 @@ const Results = () => {
                 result={nutritionResult}
                 title="Detailed Nutrition Information"
               />
+            </div>
+          )}
+
+          {/* Suggestions Section - shown when suggestions are available */}
+          {suggestions.length > 0 && (
+            <div className="mb-8 animate-fade-in">
+              <SuggestionList suggestions={suggestions} />
             </div>
           )}
         </div>

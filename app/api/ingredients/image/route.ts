@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { calculateNutrition, preloadDatabase } from "@/lib/nutrition";
+import { getSmartSuggestions } from "../utils/gemini";
 
 /**
  * API Route: /api/ingredients/image
@@ -140,6 +141,12 @@ export async function POST(request: NextRequest) {
     // Parse the FormData from the request
     const formData = await request.formData();
     const file = formData.get("image") as File | null;
+    
+    // Get optional filters and goals from form data
+    const filtersStr = formData.get("filters") as string | null;
+    const goalsStr = formData.get("goals") as string | null;
+    const filters = filtersStr ? JSON.parse(filtersStr) : undefined;
+    const goals = goalsStr ? JSON.parse(goalsStr) : undefined;
 
     if (!file) {
       return NextResponse.json(
@@ -194,11 +201,21 @@ export async function POST(request: NextRequest) {
     // Match ingredients to nutrition database and calculate nutrition
     const result = calculateNutrition(ingredients);
 
-    // Include the detected ingredients in the response
+    // Get smart suggestions from Gemini (non-blocking - don't fail if suggestions fail)
+    let suggestions: any[] = [];
+    try {
+      suggestions = await getSmartSuggestions(ingredients, filters, goals);
+    } catch (error) {
+      console.warn("Failed to get suggestions, continuing without them:", error);
+    }
+
+    // Include the detected ingredients and suggestions in the response
     return NextResponse.json(
       {
         ...result,
-        detectedIngredients: ingredients,
+        detected: ingredients,
+        detectedIngredients: ingredients, // Keep for backward compatibility
+        suggestions,
       },
       { status: 200 }
     );
@@ -215,5 +232,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
 
 

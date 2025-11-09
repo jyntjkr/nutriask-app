@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AnalysisResult, AnalysisError } from "@/lib/types";
 import { calculateNutrition } from "@/lib/nutrition";
+import { getSmartSuggestions } from "../ingredients/utils/gemini";
 
 /**
  * API Route: /api/analyze
@@ -116,6 +117,12 @@ export async function POST(request: NextRequest) {
     // Parse the FormData from the request
     const formData = await request.formData();
     const file = formData.get("image") as File | null;
+    
+    // Get optional filters and goals from form data
+    const filtersStr = formData.get("filters") as string | null;
+    const goalsStr = formData.get("goals") as string | null;
+    const filters = filtersStr ? JSON.parse(filtersStr) : undefined;
+    const goals = goalsStr ? JSON.parse(goalsStr) : undefined;
 
     if (!file) {
       return NextResponse.json<AnalysisError>(
@@ -271,10 +278,19 @@ export async function POST(request: NextRequest) {
     // Calculate nutrients based on the ingredients
     const nutritionResult = calculateNutrition(analysisResult.ingredients);
 
-    // Return the successfully parsed analysis result with nutrients
+    // Get smart suggestions from Gemini (non-blocking - don't fail if suggestions fail)
+    let suggestions: any[] = [];
+    try {
+      suggestions = await getSmartSuggestions(analysisResult.ingredients, filters, goals);
+    } catch (error) {
+      console.warn("Failed to get suggestions, continuing without them:", error);
+    }
+
+    // Return the successfully parsed analysis result with nutrients and suggestions
     return NextResponse.json({
       ...analysisResult,
-      nutrients: nutritionResult
+      nutrients: nutritionResult,
+      suggestions,
     }, { status: 200 });
 
   } catch (error) {

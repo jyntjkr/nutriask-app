@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculateNutrition, preloadDatabase } from "@/lib/nutrition";
+import { getSmartSuggestions } from "../utils/gemini";
 
 /**
  * API Route: /api/ingredients/text
@@ -14,7 +15,7 @@ preloadDatabase();
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ingredients, quantities } = body;
+    const { ingredients, quantities, filters, goals } = body;
 
     // Validate input
     if (!ingredients || !Array.isArray(ingredients) || ingredients.length === 0) {
@@ -41,7 +42,22 @@ export async function POST(request: NextRequest) {
     // Calculate nutrition for all ingredients
     const result = calculateNutrition(ingredients, quantities);
 
-    return NextResponse.json(result, { status: 200 });
+    // Get smart suggestions from Gemini (non-blocking - don't fail if suggestions fail)
+    let suggestions: any[] = [];
+    try {
+      suggestions = await getSmartSuggestions(ingredients, filters, goals);
+    } catch (error) {
+      console.warn("Failed to get suggestions, continuing without them:", error);
+    }
+
+    return NextResponse.json(
+      {
+        ...result,
+        suggestions,
+        detected: ingredients,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("Error processing text ingredients:", error);
     
@@ -55,5 +71,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
 
 

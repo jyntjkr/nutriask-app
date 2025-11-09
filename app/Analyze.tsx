@@ -11,11 +11,15 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { toast } from "sonner";
 import { AnalysisResult } from "@/lib/types";
+import { Badge } from "@/components/ui/badge";
 
 interface Ingredient {
   name: string;
   quantity: number;
 }
+
+const DIETARY_FILTERS = ["Low Carb", "High Protein", "Vegan", "Vegetarian", "Gluten Free", "Low Fat"];
+const USER_GOALS = ["Weight Loss", "Muscle Gain", "Balanced Diet", "Heart Health", "Energy Boost"];
 
 const Analyze = () => {
   const router = useRouter();
@@ -25,6 +29,10 @@ const Analyze = () => {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Filter and goal selection state
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
+  const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
   
   // Camera-related state
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -263,6 +271,14 @@ const Analyze = () => {
       // Create FormData to send the image file
       const formData = new FormData();
       formData.append("image", uploadedFile);
+      
+      // Add filters and goals if selected
+      if (selectedFilters.length > 0) {
+        formData.append("filters", JSON.stringify(selectedFilters));
+      }
+      if (selectedGoals.length > 0) {
+        formData.append("goals", JSON.stringify(selectedGoals));
+      }
 
       // Perform full food analysis (this already includes nutrition calculation)
       const analysisResponse = await fetch("/api/analyze", {
@@ -332,6 +348,13 @@ const Analyze = () => {
     }
   }, [inputMethod, isCameraActive, stopCamera]);
 
+  /**
+   * Clear sessionStorage suggestions when switching input methods
+   */
+  useEffect(() => {
+    sessionStorage.removeItem("suggestions");
+  }, [inputMethod]);
+
   const handleParseIngredients = () => {
     const parsed = ingredientText
       .split(",")
@@ -381,6 +404,8 @@ const Analyze = () => {
         body: JSON.stringify({
           ingredients: ingredientNames,
           quantities: quantities,
+          filters: selectedFilters.length > 0 ? selectedFilters : undefined,
+          goals: selectedGoals.length > 0 ? selectedGoals : undefined,
         }),
       });
 
@@ -395,6 +420,12 @@ const Analyze = () => {
 
       // Store the nutrition result in sessionStorage
       sessionStorage.setItem("nutritionResult", JSON.stringify(data));
+      
+      // Store suggestions separately if available
+      if (data.suggestions) {
+        sessionStorage.setItem("suggestions", JSON.stringify(data.suggestions));
+      }
+      
       sessionStorage.setItem("resultType", "nutrition");
       
       toast.success("Nutrition calculated!", { id: "calculating" });
@@ -421,6 +452,68 @@ const Analyze = () => {
               Upload a photo or type ingredients to get nutrition insights
             </p>
           </div>
+
+          {/* Filter and Goal Selection */}
+          <Card className="p-6 mb-8 bg-gradient-card border-none shadow-soft">
+            <h3 className="text-lg font-semibold mb-4">Dietary Preferences (Optional)</h3>
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm text-muted-foreground mb-2 block">Dietary Filters</Label>
+                <div className="flex flex-wrap gap-2">
+                  {DIETARY_FILTERS.map((filter) => (
+                    <Badge
+                      key={filter}
+                      variant={selectedFilters.includes(filter) ? "default" : "outline"}
+                      className="cursor-pointer hover:bg-primary/10 transition-colors"
+                      onClick={() => {
+                        setSelectedFilters(prev =>
+                          prev.includes(filter)
+                            ? prev.filter(f => f !== filter)
+                            : [...prev, filter]
+                        );
+                      }}
+                    >
+                      {filter}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label className="text-sm text-muted-foreground mb-2 block">Health Goals</Label>
+                <div className="flex flex-wrap gap-2">
+                  {USER_GOALS.map((goal) => (
+                    <Badge
+                      key={goal}
+                      variant={selectedGoals.includes(goal) ? "default" : "outline"}
+                      className="cursor-pointer hover:bg-primary/10 transition-colors"
+                      onClick={() => {
+                        setSelectedGoals(prev =>
+                          prev.includes(goal)
+                            ? prev.filter(g => g !== goal)
+                            : [...prev, goal]
+                        );
+                      }}
+                    >
+                      {goal}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              {(selectedFilters.length > 0 || selectedGoals.length > 0) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedFilters([]);
+                    setSelectedGoals([]);
+                  }}
+                  className="text-xs"
+                >
+                  Clear All
+                </Button>
+              )}
+            </div>
+          </Card>
 
           {/* Input Method Selector */}
           <div className="flex gap-4 mb-8 justify-center flex-wrap">

@@ -42,6 +42,12 @@ export interface MatchedIngredient {
 export interface NutritionResult {
   aggregated: AggregatedNutrients;
   items: MatchedIngredient[];
+  suggestions?: Array<{
+    ingredient: string;
+    suggestion: string;
+    reason: string;
+  }>; // Optional ingredient substitution suggestions
+  detected?: string[]; // Optional detected ingredient names
 }
 
 // Cache for CSV data to optimize cold-start time
@@ -62,10 +68,9 @@ function loadFoodDatabase(): FoodNutrient[] {
     const fileContent = readFileSync(csvPath, "utf-8");
 
     // Parse CSV with headers using papaparse
-    const parseResult = Papa.parse(fileContent, {
+    const parseResult = Papa.parse<any>(fileContent, {
       header: true,
       skipEmptyLines: true,
-      trimHeaders: true,
       transformHeader: (header: string) => header.trim(),
       transform: (value: string) => value.trim(), // Also trim values
     });
