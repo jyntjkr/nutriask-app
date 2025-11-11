@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
 
     // Construct the Gemini API request
     // Using gemini-2.0-flash-exp model (supports image understanding)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     const requestBody = {
       contents: [

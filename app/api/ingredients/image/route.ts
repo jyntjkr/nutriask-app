@@ -64,7 +64,7 @@ async function extractIngredientsFromImage(
   apiKey: string
 ): Promise<string[]> {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   // Convert base64 to format expected by Gemini
   const imagePart = {
